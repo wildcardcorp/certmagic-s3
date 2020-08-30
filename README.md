@@ -1,13 +1,27 @@
 ## Certmagic-S3
 
-Certmagic S3-compatible driver written in Go, using single node Redis as the lock.
+Caddy certmagic S3-compatible driver written in Go, using single node Redis as the lock.
 
 ### Guide
+    
+Build
+
+    go get -u github.com/caddyserver/xcaddy/cmd/xcaddy
+    
+    xcaddy build --output ./caddy --with github.com/ss098/certmagic-s3
+
+Build container
+
+    FROM caddy:builder AS builder
+    RUN caddy-builder github.com/ss098/certmagic-s3
+    
+    FROM caddy
+    COPY --from=builder /usr/bin/caddy /usr/bin/caddy
 
 Run
 
-    xcaddy run --config caddy.json
-    
+    caddy run --config caddy.json
+
 Config example
 
     {
