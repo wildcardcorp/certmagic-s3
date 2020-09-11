@@ -1,11 +1,11 @@
 ## Certmagic-S3
 
-Caddy certmagic S3-compatible driver written in Go, using single node Redis as the lock.
+Certmagic S3-compatible driver written in Go, using single node Redis as the lock.
 
 Test passed on:
 
  - Vultr Objects
- - DigitanOcean Spaces
+ - DigitalOcean Spaces
 
 ### Guide
     
