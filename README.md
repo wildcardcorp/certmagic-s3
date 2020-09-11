@@ -2,6 +2,11 @@
 
 Caddy certmagic S3-compatible driver written in Go, using single node Redis as the lock.
 
+Test passed on:
+
+ - Vultr Objects
+ - DigitanOcean Spaces
+
 ### Guide
     
 Build
@@ -25,25 +30,18 @@ Run
 Config example
 
     {
-      "apps": {
-        "tls": {
-          "automation": {
-            "policies": [
-              {
-                "storage": {
-                  "module": "s3",
-                  "host": "Host",
-                  "bucket": "Bucket",
-                  "access_key": "AccessKey",
-                  "secret_key": "SecretKey",
-                  "prefix": "ssl",
-                  "redis_address": "127.0.0.1:6379"，
-                  "redis_password": "",
-                  "redis_db": 0
-                }
-              }
-            ]
-          }
-        }
+      "storage": {
+        "module": "s3",
+        "host": "Host",
+        "bucket": "Bucket",
+        "access_key": "AccessKey",
+        "secret_key": "SecretKey",
+        "prefix": "ssl",
+        "redis_address": "127.0.0.1:6379"，
+        "redis_password": "",
+        "redis_db": 0
+      }
+      "app": {
+        ...
       }
     }
