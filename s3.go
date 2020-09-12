@@ -36,7 +36,7 @@ type S3 struct {
 }
 
 func init() {
-	caddy.RegisterModule(&S3{})
+	caddy.RegisterModule(new(S3))
 }
 
 func (s3 *S3) Provision(context caddy.Context) error {
