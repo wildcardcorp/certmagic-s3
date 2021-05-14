@@ -1,6 +1,6 @@
 ## Certmagic-S3
 
-Certmagic S3-compatible driver written in Go, using single node Redis as the lock.
+Certmagic S3-compatible driver written in Go, using [FastAPI Simple Mutex Server](https://github.com/daxxog/fastapi-simple-mutex-server) as the lock.
 
 Test passed on:
 
@@ -13,12 +13,12 @@ Build
 
     go get -u github.com/caddyserver/xcaddy/cmd/xcaddy
     
-    xcaddy build --output ./caddy --with github.com/ss098/certmagic-s3
+    xcaddy build --output ./caddy --with github.com/daxxog/certmagic-s3
 
 Build container
 
     FROM caddy:builder AS builder
-    RUN caddy-builder github.com/ss098/certmagic-s3
+    RUN caddy-builder github.com/daxxog/certmagic-s3
     
     FROM caddy
     COPY --from=builder /usr/bin/caddy /usr/bin/caddy
@@ -37,9 +37,8 @@ Config example
         "access_key": "AccessKey",
         "secret_key": "SecretKey",
         "prefix": "ssl",
-        "redis_address": "127.0.0.1:6379"，
-        "redis_password": "",
-        "redis_db": 0
+        "fasms_endpoint": "https://my-fastapi-simple-mutex-server.example.com",
+        "fasms_api_key": "APIKey"
       }
       "app": {
         ...

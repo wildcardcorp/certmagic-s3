@@ -3,18 +3,163 @@ package certmagic_s3
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"github.com/bsm/redislock"
+	"io/ioutil"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/certmagic"
-	"github.com/go-redis/redis/v7"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"go.uber.org/zap"
-	"io/ioutil"
-	"strings"
-	"time"
 )
+
+type FASMSLockerClient struct {
+	endpoint string
+	apiKey   string
+}
+
+type FASMSLocker struct {
+	client       *FASMSLockerClient
+	resourceName string
+	uuid         string
+}
+
+type FASMSObtainMutexResponse struct {
+	Obtained bool   `json:"obtained"`
+	UUID     string `json:"uuid"`
+}
+
+type FASMSReleaseMutexResponse struct {
+	Released bool `json:"released"`
+}
+
+func (client *FASMSLockerClient) baseMutexUrl() string {
+	return client.endpoint + "/api/v1/mutex?api_key=" + url.QueryEscape(client.apiKey)
+}
+
+func (locker *FASMSLocker) resourceUrl() string {
+	return locker.client.baseMutexUrl() + "&resource_name=" + url.QueryEscape(locker.resourceName)
+}
+
+func (locker *FASMSLocker) obtainMutexUrl(ttl time.Duration) string {
+	return locker.resourceUrl() + "&ttl=" + url.QueryEscape(strconv.Itoa(int(ttl.Seconds())))
+}
+
+func (locker *FASMSLocker) releaseMutexUrl() string {
+	return locker.resourceUrl() + "&uuid=" + url.QueryEscape(locker.uuid)
+}
+
+func (locker *FASMSLocker) Lock(ctx context.Context, ttl time.Duration) error {
+	lockerErrChan := make(chan error)
+	go func() {
+		// keep trying to obtain the lock
+		for {
+			resp, err := locker.lock(ttl)
+			if err != nil {
+				lockerErrChan <- err
+				return
+			}
+			if resp.Obtained == true {
+				locker.uuid = resp.UUID
+				lockerErrChan <- nil
+				return
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
+	for {
+		// either obtain the lock or context expires
+		select {
+		case lockErr := <-lockerErrChan:
+			return lockErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (locker *FASMSLocker) lock(ttl time.Duration) (*FASMSObtainMutexResponse, error) {
+	if resp, err := http.Get(locker.obtainMutexUrl(ttl)); err == nil {
+		if resp.StatusCode == 200 {
+			if body, err := ioutil.ReadAll(resp.Body); err == nil {
+				var jsonResp FASMSObtainMutexResponse
+				if err := json.Unmarshal(body, &jsonResp); err == nil {
+					return &jsonResp, nil
+				} else {
+					return nil, err
+				}
+			} else {
+				return nil, err
+			}
+		} else {
+			err := errors.New("FASMSLocker.Lock: got status code " + strconv.Itoa(resp.StatusCode) + ", but expected 200 on endpoint " + locker.client.endpoint)
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+}
+
+func (locker *FASMSLocker) Unlock(ctx context.Context) error {
+	unlockerErrChan := make(chan error)
+	go func() {
+		resp, err := locker.unlock()
+		if err != nil {
+			unlockerErrChan <- err
+			return
+		}
+		if resp.Released == true {
+			unlockerErrChan <- nil
+			return
+		} else {
+			unlockerErrChan <- errors.New("FASMSLocker.Unlock: could not unlock resource '" + locker.resourceName + "' with uuid '" + locker.uuid + "'")
+			return
+		}
+	}()
+	for {
+		// either release the lock or context expires
+		select {
+		case lockErr := <-unlockerErrChan:
+			return lockErr
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func (locker *FASMSLocker) unlock() (*FASMSReleaseMutexResponse, error) {
+	client := http.Client{}
+	if req, err := http.NewRequest(http.MethodDelete, locker.releaseMutexUrl(), nil); err == nil {
+		if resp, err := client.Do(req); err == nil {
+			if resp.StatusCode == 200 {
+				if body, err := ioutil.ReadAll(resp.Body); err == nil {
+					var jsonResp FASMSReleaseMutexResponse
+					if err := json.Unmarshal(body, &jsonResp); err == nil {
+						return &jsonResp, nil
+					} else {
+						return nil, err
+					}
+				} else {
+					return nil, err
+				}
+			} else {
+				err := errors.New("FASMSLocker.Unlock: got status code " + strconv.Itoa(resp.StatusCode) + ", but expected 199 on endpoint " + locker.client.endpoint)
+				return nil, err
+			}
+		} else {
+			return nil, err
+		}
+	} else {
+		return nil, err
+	}
+}
 
 type S3 struct {
 	Logger *zap.Logger
@@ -27,12 +172,11 @@ type S3 struct {
 	SecretKey string `json:"secret_key"`
 	Prefix    string `json:"prefix"`
 
-	RedisClient   *redis.Client
-	RedisLocker   *redislock.Client
-	RedisLocks    map[string]*redislock.Lock
-	RedisAddress  string `json:"redis_address"`  // localhost:6379
-	RedisPassword string `json:"redis_password"` // empty
-	RedisDB       int    `json:"redis_db"`       // 0
+	// FASMS
+	FASMSClient   *FASMSLockerClient
+	FASMSLocks    map[string]*FASMSLocker
+	FASMSEndpoint string `json:"fasms_endpoint"`
+	FASMSApiKey   string `json:"fasms_api_key"`
 }
 
 func init() {
@@ -50,15 +194,9 @@ func (s3 *S3) Provision(context caddy.Context) error {
 
 	s3.Client = client
 
-	// Redis Client
-	s3.RedisClient = redis.NewClient(&redis.Options{
-		Network:  "tcp",
-		Addr:     s3.RedisAddress,
-		Password: s3.RedisPassword,
-		DB:       s3.RedisDB,
-	})
-	s3.RedisLocker = redislock.New(s3.RedisClient)
-	s3.RedisLocks = make(map[string]*redislock.Lock)
+	// FASMS Client
+	s3.FASMSClient = &FASMSLockerClient{endpoint: s3.FASMSEndpoint, apiKey: s3.FASMSApiKey}
+	s3.FASMSLocks = make(map[string]*FASMSLocker)
 
 	return nil
 }
@@ -68,13 +206,11 @@ func (s3 *S3) Cleanup() error {
 		s3.Logger.Info("S3 Cleanup")
 	}
 
-	for _, lock := range s3.RedisLocks {
-		s3.Logger.Info(fmt.Sprintf("Release Redis Lock: %v", lock))
+	for _, lock := range s3.FASMSLocks {
+		s3.Logger.Info(fmt.Sprintf("Release FASMS Lock: %v", lock.resourceName))
 
-		_ = lock.Release()
+		_ = lock.Unlock(context.Background())
 	}
-
-	_ = s3.RedisClient.Close()
 
 	return nil
 }
@@ -92,16 +228,15 @@ func (s3 *S3) CertMagicStorage() (certmagic.Storage, error) {
 	return s3, nil
 }
 
-func (s3 *S3) Lock(_ context.Context, key string) error {
+func (s3 *S3) Lock(ctx context.Context, key string) error {
 	s3.Logger.Info(fmt.Sprintf("Lock: %v", key))
 
-	lock, err := s3.RedisLocker.Obtain(key, time.Minute, nil)
+	lock := &FASMSLocker{client: s3.FASMSClient, resourceName: key}
+	err := lock.Lock(ctx, time.Minute)
 
-	s3.RedisLocks[key] = lock
+	s3.FASMSLocks[key] = lock
 
-	if err == redislock.ErrNotObtained {
-		s3.Logger.Error(fmt.Sprintf("Cannot lock key: %v", key))
-	} else if err != nil {
+	if err != nil {
 		s3.Logger.Error(fmt.Sprintf("Lock error: %v", err))
 	}
 
@@ -109,12 +244,12 @@ func (s3 *S3) Lock(_ context.Context, key string) error {
 }
 
 func (s3 *S3) Unlock(key string) error {
-	if lock, exists := s3.RedisLocks[key]; exists {
+	if lock, exists := s3.FASMSLocks[key]; exists {
 		s3.Logger.Info(fmt.Sprintf("Release lock: %v", key))
 
-		err := lock.Release()
+		err := lock.Unlock(context.Background())
 
-		delete(s3.RedisLocks, key)
+		delete(s3.FASMSLocks, key)
 
 		if err != nil {
 			return err
