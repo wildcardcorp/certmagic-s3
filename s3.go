@@ -150,7 +150,7 @@ func (locker *FASMSLocker) unlock() (*FASMSReleaseMutexResponse, error) {
 					return nil, err
 				}
 			} else {
-				err := errors.New("FASMSLocker.Unlock: got status code " + strconv.Itoa(resp.StatusCode) + ", but expected 199 on endpoint " + locker.client.endpoint)
+				err := errors.New("FASMSLocker.Unlock: got status code " + strconv.Itoa(resp.StatusCode) + ", but expected 200 on endpoint " + locker.client.endpoint)
 				return nil, err
 			}
 		} else {
