@@ -1,6 +1,6 @@
 ## Certmagic-S3
 
-Certmagic S3-compatible driver written in Go, using [FastAPI Simple Mutex Server](https://github.com/daxxog/fastapi-simple-mutex-server) as the lock.
+Certmagic S3-compatible driver written in Go, using [FastAPI Simple Mutex Server](https://github.com/wildcardcorp/fastapi-simple-mutex-server) as the lock.
 
 Test passed on:
 
