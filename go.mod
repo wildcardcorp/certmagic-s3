@@ -1,10 +1,10 @@
-module github.com/daxxog/certmagic-s3
+module github.com/wildcardcorp/certmagic-s3
 
 go 1.14
 
 require (
-	github.com/caddyserver/caddy/v2 v2.1.1
-	github.com/caddyserver/certmagic v0.11.2
-	github.com/minio/minio-go/v7 v7.0.5
-	go.uber.org/zap v1.15.0
+	github.com/caddyserver/caddy/v2 v2.7.3
+	github.com/caddyserver/certmagic v0.19.1
+	github.com/minio/minio-go/v7 v7.0.61
+	go.uber.org/zap v1.25.0
 )
