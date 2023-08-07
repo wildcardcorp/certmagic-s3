@@ -1,6 +1,6 @@
 module github.com/wildcardcorp/certmagic-s3
 
-go 1.14
+go 1.20.7
 
 require (
 	github.com/caddyserver/caddy/v2 v2.7.3
